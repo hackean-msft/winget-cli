@@ -71,8 +71,8 @@ namespace AppInstaller::CLI
         }
 
         context <<
-            OpenSource <<
-            OpenCompositeSource(Repository::PredefinedSource::Installed);
+            Workflow::OpenSource() <<
+            Workflow::OpenCompositeSource(Repository::PredefinedSource::Installed);
 
         switch (valueType)
         {
@@ -128,9 +128,9 @@ namespace AppInstaller::CLI
         }
 
         context <<
-            ReportExecutionStage(ExecutionStage::Discovery) <<
-            OpenSource <<
-            OpenCompositeSource(Repository::PredefinedSource::Installed);
+            Workflow::ReportExecutionStage(ExecutionStage::Discovery) <<
+            Workflow::OpenSource() <<
+            Workflow::OpenCompositeSource(Repository::PredefinedSource::Installed);
 
         if (ShouldListUpgrade(context))
         {

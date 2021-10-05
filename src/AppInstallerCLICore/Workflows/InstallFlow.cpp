@@ -9,7 +9,7 @@
 #include "MSStoreInstallerHandler.h"
 #include "MsiInstallFlow.h"
 #include "WorkflowBase.h"
-#include "Workflows/DependenciesFlow.h"
+#include "DependenciesFlow.h"
 
 #include <AppInstallerDeployment.h>
 #include <AppInstallerMsixInfo.h>
@@ -628,13 +628,18 @@ namespace AppInstaller::CLI::Workflow
             Workflow::ShowPackageAgreements(/* ensureAcceptance */ true) <<
             Workflow::GetDependenciesFromInstaller << 
             Workflow::ReportDependencies(Resource::String::InstallAndUpgradeCommandsReportDependencies) <<
+            Workflow::ManagePackageDependencies(Resource::String::InstallAndUpgradeCommandsReportDependencies) <<
             Workflow::InstallPackageInstaller;
     }
 
     void InstallMultiplePackages::operator()(Execution::Context& context) const
     {
-        // Show all license agreements before installing anything
-        context << Workflow::EnsurePackageAgreementsAcceptanceForMultipleInstallers;
+        if (m_ensurePackageAgreements)
+        {
+            // Show all license agreements before installing anything
+            context << Workflow::EnsurePackageAgreementsAcceptanceForMultipleInstallers;
+        }
+
         if (context.IsTerminated())
         {
             return;
@@ -668,10 +673,12 @@ namespace AppInstaller::CLI::Workflow
             installContext.Add<Execution::Data::InstalledPackageVersion>(package.InstalledPackageVersion);
             installContext.Add<Execution::Data::Installer>(package.Installer);
 
-            installContext <<
-                Workflow::ReportIdentityAndInstallationDisclaimer <<
-                Workflow::InstallPackageInstaller;
-
+            installContext << Workflow::ReportIdentityAndInstallationDisclaimer;
+            if (!m_ignorePackageDependencies)
+            {
+                installContext << Workflow::ManagePackageDependencies(m_dependenciesReportMessage);
+            }
+            installContext << Workflow::InstallPackageInstaller;
             installContext.Reporter.Info() << std::endl;
 
             if (installContext.IsTerminated())

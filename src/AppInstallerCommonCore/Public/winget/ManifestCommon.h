@@ -5,6 +5,7 @@
 #include <AppInstallerVersions.h>
 #include <functional>
 #include <map>
+#include <set>
 #include <string_view>
 
 namespace AppInstaller::Manifest
@@ -53,7 +54,7 @@ namespace AppInstaller::Manifest
 
         bool HasExtension() const;
 
-        bool HasExtension(std::string_view extension) const;
+bool HasExtension(std::string_view extension) const;
 
     private:
         std::vector<Version> m_extensions;
@@ -171,11 +172,25 @@ namespace AppInstaller::Manifest
     {
         DependencyType Type;
         string_t Id;
-        std::optional<string_t> MinVersion;
+        std::optional<AppInstaller::Utility::Version> MinVersion;
 
-        Dependency(DependencyType type, string_t id, string_t minVersion) : Type(type), Id(std::move(id)), MinVersion(std::move(minVersion)) {}
-        Dependency(DependencyType type, string_t id) : Type(std::move(type)), Id(std::move(id)) {}
+        Dependency(DependencyType type, string_t id, string_t minVersion) : Type(type), Id(std::move(id)), MinVersion(AppInstaller::Utility::Version(minVersion)) {}
+        Dependency(DependencyType type, string_t id) : Type(type), Id(std::move(id)) {}
         Dependency(DependencyType type) : Type(type) {}
+
+        bool operator==(const Dependency& rhs) const {
+            return Type == rhs.Type && ICUCaseInsensitiveEquals(Id, rhs.Id);
+        }
+
+        bool operator <(const Dependency& rhs) const
+        {
+            return Id < rhs.Id;
+        }
+
+        bool IsVersionOk(string_t version)
+        {
+            return MinVersion <= AppInstaller::Utility::Version(version);
+        }
     };
 
     struct AppsAndFeaturesEntry
@@ -200,18 +215,16 @@ namespace AppInstaller::Manifest
 
         void Add(const Dependency& newDependency)
         { 
-            Dependency* existingDependency = this->HasDependency(newDependency);
+            Dependency* existingDependency = HasDependency(newDependency);
 
             if (existingDependency != NULL) {
                 if (newDependency.MinVersion) 
                 {
                     if (existingDependency->MinVersion)
                     {
-                        const auto& newDependencyVersion = AppInstaller::Utility::Version(newDependency.MinVersion.value());
-                        const auto& existingDependencyVersion = AppInstaller::Utility::Version(existingDependency->MinVersion.value());
-                        if (newDependencyVersion > existingDependencyVersion) 
+                        if (newDependency.MinVersion.value() > existingDependency->MinVersion.value())
                         {
-                            existingDependency->MinVersion.value() = newDependencyVersion.ToString();
+                            existingDependency->MinVersion.value() = newDependency.MinVersion.value();
                         }
                     }
                     else
@@ -230,7 +243,7 @@ namespace AppInstaller::Manifest
         {
             for (const auto& dependency : otherDependencyList.dependencies)
             {
-                this->Add(dependency);
+                Add(dependency);
             }
         }
 
@@ -247,13 +260,36 @@ namespace AppInstaller::Manifest
         Dependency* HasDependency(const Dependency& dependencyToSearch)
         {
             for (auto& dependency : dependencies) {
-                if (dependency.Type == dependencyToSearch.Type && ICUCaseInsensitiveEquals(dependency.Id, dependencyToSearch.Id))
+                if (dependency == dependencyToSearch)
                 {
                     return &dependency;
                 }
             }
             return nullptr;
         }
+
+        void ApplyToType(DependencyType type, std::function<void(const Dependency&)> func) const
+        {
+            for (const auto& dependency : dependencies)
+            {
+                if (dependency.Type == type) func(dependency);
+            }
+        }
+
+        void ApplyToAll(std::function<void(const Dependency&)> func) const
+        {
+            for (const auto& dependency : dependencies)
+            {
+                func(dependency);
+            }
+        }
+
+        bool Empty() const
+        {
+            return dependencies.empty();
+        }
+
+        void Clear() { dependencies.clear(); }
 
         // for testing purposes
         bool HasExactDependency(DependencyType type, string_t id, string_t minVersion = "")
@@ -263,7 +299,7 @@ namespace AppInstaller::Manifest
                 if (dependency.Type == type && Utility::ICUCaseInsensitiveEquals(dependency.Id, id))
                 {
                     if (dependency.MinVersion) {
-                        if (dependency.MinVersion.value() == minVersion)
+                        if (dependency.MinVersion.value() == AppInstaller::Utility::Version(minVersion))
                         {
                             return true;
                         }
@@ -281,18 +317,143 @@ namespace AppInstaller::Manifest
             return dependencies.size();
         }
 
-        void ApplyToType(DependencyType type, std::function<void(const Dependency&)> func) const
-        {
-            for (const auto& dependency : dependencies)
-            {
-                if (dependency.Type == type) func(dependency);
-            }
-        }
-
-        void Clear() { dependencies.clear(); }
-
     private:
         std::vector<Dependency> dependencies;
+    };
+
+    struct DependencyGraph
+    {
+        // this constructor was intented for use during installation flow (we already have installer dependencies and there's no need to search the source again)
+        DependencyGraph(const Dependency& root, const DependencyList& rootDependencies,
+            std::function<const DependencyList(const Dependency&)> infoFunction) : m_root(root), getDependencies(infoFunction)
+        {
+            m_adjacents[m_root] = std::set<Dependency>();
+            m_toCheck = std::vector<Dependency>();
+            rootDependencies.ApplyToType(DependencyType::Package, [&](Dependency dependency)
+                {
+                    m_toCheck.push_back(dependency);
+                    AddNode(dependency);
+                    AddAdjacent(root, dependency);
+                });
+        }
+
+        DependencyGraph(const Dependency& root, std::function<const DependencyList(const Dependency&)> infoFunction) : m_root(root), getDependencies(infoFunction)
+        {
+            m_adjacents[m_root] = std::set<Dependency>();
+            m_toCheck = std::vector<Dependency>();
+
+            const DependencyList& rootDependencies = getDependencies(root);
+            rootDependencies.ApplyToType(DependencyType::Package, [&](Dependency dependency)
+                {
+                    m_toCheck.push_back(dependency);
+                    AddNode(dependency);
+                    AddAdjacent(root, dependency);
+                });
+        }
+
+        void BuildGraph()
+        {
+            if (m_toCheck.empty())
+            {
+                return;
+            }
+
+            for (unsigned int i = 0; i < m_toCheck.size(); ++i)
+            {
+                auto node = m_toCheck.at(i);
+
+                const auto& nodeDependencies = getDependencies(node);
+                nodeDependencies.ApplyToType(DependencyType::Package, [&](Dependency dependency)
+                    {
+                        if (!HasNode(dependency))
+                        {
+                            m_toCheck.push_back(dependency);
+                            AddNode(dependency);
+                        }
+
+                        AddAdjacent(node, dependency);
+                    });
+            }
+
+            CheckForLoopsAndGetOrder();
+        }
+
+        void AddNode(const Dependency& node)
+        {
+            m_adjacents[node] = std::set<Dependency>();
+        }
+
+        void AddAdjacent(const Dependency& node,const Dependency& adjacent)
+        {
+            m_adjacents[node].emplace(adjacent);
+        }
+
+        bool HasNode(const Dependency& dependency)
+        {
+            auto search = m_adjacents.find(dependency);
+            return search != m_adjacents.end();
+        }
+
+        bool HasLoop()
+        {
+            return hasLoop;
+        }
+
+        void CheckForLoopsAndGetOrder()
+        {
+            m_installationOrder = std::vector<Dependency>();
+            std::set<Dependency> visited;
+            hasLoop = HasLoopDFS(visited, m_root);
+        }
+
+        std::vector<Dependency> GetInstallationOrder()
+        {
+            return m_installationOrder;
+        }
+
+    private:
+        // TODO make this function iterative
+        bool HasLoopDFS(std::set<Dependency> visited, const Dependency& node)
+        {
+            bool loop = false;
+
+            visited.insert(node);
+            auto lAdjacents = m_adjacents.at(node);
+            for (const auto& adjacent : m_adjacents.at(node))
+            {
+                auto search = visited.find(adjacent);
+                if (search == visited.end()) // if not found
+                {
+                    if (HasLoopDFS(visited, adjacent))
+                    {
+                        loop = true;
+                        // didn't break the loop to have a complete order at the end (even if a loop exists)
+                    }
+                }
+                else
+                {
+                    loop = true;
+                    // didn't break the loop to have a complete order at the end (even if a loop exists)
+                }
+            }
+
+            // Adding to have an order even if a loop is present
+            if (std::find(m_installationOrder.begin(), m_installationOrder.end(), node) == m_installationOrder.end())
+            {
+                m_installationOrder.push_back(node);
+            }
+
+            return loop;
+        }
+
+        const Dependency& m_root;
+        std::map<Dependency, std::set<Dependency>> m_adjacents;
+        std::function<const DependencyList(const Dependency&)> getDependencies;
+
+        bool hasLoop;
+        std::vector<Dependency> m_installationOrder;
+
+        std::vector<Dependency> m_toCheck;
     };
 
     InstallerTypeEnum ConvertToInstallerTypeEnum(const std::string& in);
