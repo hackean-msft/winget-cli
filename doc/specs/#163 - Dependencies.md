@@ -16,7 +16,7 @@ Several packages require other packages as dependencies. The Windows Package Man
 ## Inspiration
 
 Many other package mangers have this capability. It's frustrating to be required to figure out what other dependencies are needed for a package, and have to deal with their dependencies as well.
-
+a
 ## Solution Design
 
 The Windows Package Manager manifest v1.0 schema has provided keys for four different types of dependencies.
