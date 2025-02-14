@@ -1,11 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #pragma once
+#include <AppInstallerDownloader.h>
 #include <winget/RepositorySource.h>
 #include <winget/Manifest.h>
+#include <winget/ARPCorrelation.h>
+#include <winget/Authentication.h>
+#include <winget/Pin.h>
+#include <winget/PinningData.h>
 #include "CompletionData.h"
 #include "PackageCollection.h"
+#include "PortableInstaller.h"
 #include "Workflows/WorkflowBase.h"
+#include "ConfigurationContext.h"
 
 #include <filesystem>
 #include <map>
@@ -13,7 +20,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
 
 namespace AppInstaller::CLI::Execution
 {
@@ -23,17 +29,18 @@ namespace AppInstaller::CLI::Execution
     enum class Data : size_t
     {
         Source,
+        SearchRequest, // Only set for multiple installs
         SearchResult,
         SourceList,
         Package,
         Manifest,
         PackageVersion,
         Installer,
-        HashPair,
+        DownloadHashInfo,
         InstallerPath,
         LogPath,
         InstallerArgs,
-        InstallerReturnCode,
+        OperationReturnCode,
         CompletionData,
         InstalledPackageVersion,
         UninstallString,
@@ -42,14 +49,26 @@ namespace AppInstaller::CLI::Execution
         // On export: A collection of packages to be exported to a file
         // On import: A collection of packages read from a file
         PackageCollection,
-        // On import and upgrade all: A collection of specific package versions to install
-        PackagesToInstall,
+        // When installing multiple packages at once (upgrade all, import, install with multiple args, dependencies):
+        // A collection of sub-contexts, each of which handles the installation of a single package.
+        PackageSubContexts,
         // On import: Sources for the imported packages
         Sources,
-        ARPSnapshot,
+        ARPCorrelationData,
+        CorrelatedAppsAndFeaturesEntries,
         Dependencies,
         DependencySource,
         AllowedArchitectures,
+        AllowUnknownScope,
+        PortableInstaller,
+        PinningData,
+        Pins,
+        ConfigurationContext,
+        DownloadDirectory,
+        ModifyPath,
+        RepairString,
+        MsixDigests,
+        InstallerDownloadAuthenticators,
         Max
     };
 
@@ -70,6 +89,12 @@ namespace AppInstaller::CLI::Execution
         };
 
         template <>
+        struct DataMapping<Data::SearchRequest>
+        {
+            using value_t = Repository::SearchRequest;
+        };
+
+        template <>
         struct DataMapping<Data::SearchResult>
         {
             using value_t = Repository::SearchResult;
@@ -84,7 +109,7 @@ namespace AppInstaller::CLI::Execution
         template <>
         struct DataMapping<Data::Package>
         {
-            using value_t = std::shared_ptr<Repository::IPackage>;
+            using value_t = std::shared_ptr<Repository::ICompositePackage>;
         };
 
         template <>
@@ -106,9 +131,9 @@ namespace AppInstaller::CLI::Execution
         };
 
         template <>
-        struct DataMapping<Data::HashPair>
+        struct DataMapping<Data::DownloadHashInfo>
         {
-            using value_t = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+            using value_t = std::pair<std::vector<uint8_t>, Utility::DownloadResult>;
         };
 
         template <>
@@ -130,7 +155,7 @@ namespace AppInstaller::CLI::Execution
         };
 
         template <>
-        struct DataMapping<Data::InstallerReturnCode>
+        struct DataMapping<Data::OperationReturnCode>
         {
             using value_t = DWORD;
         };
@@ -172,7 +197,7 @@ namespace AppInstaller::CLI::Execution
         };
 
         template <>
-        struct DataMapping<Data::PackagesToInstall>
+        struct DataMapping<Data::PackageSubContexts>
         {
             using value_t = std::vector<std::unique_ptr<Context>>;
         };
@@ -184,10 +209,15 @@ namespace AppInstaller::CLI::Execution
         };
 
         template <>
-        struct DataMapping<Data::ARPSnapshot>
+        struct DataMapping<Data::ARPCorrelationData>
         {
-            // Contains the { Id, Version, Channel }
-            using value_t = std::vector<std::tuple<Utility::LocIndString, Utility::LocIndString, Utility::LocIndString>>;
+            using value_t = Repository::Correlation::ARPCorrelationData;
+        };
+
+        template <>
+        struct DataMapping<Data::CorrelatedAppsAndFeaturesEntries>
+        {
+            using value_t = std::vector<Manifest::AppsAndFeaturesEntry>;
         };
 
         template <>
@@ -206,6 +236,68 @@ namespace AppInstaller::CLI::Execution
         struct DataMapping<Data::AllowedArchitectures>
         {
             using value_t = std::vector<Utility::Architecture>;
+        };
+
+        template <>
+        struct DataMapping<Data::AllowUnknownScope>
+        {
+            using value_t = bool;
+        };
+
+        template <>
+        struct DataMapping<Data::PortableInstaller>
+        {
+            using value_t = CLI::Portable::PortableInstaller;
+        };
+
+        template <>
+        struct DataMapping<Data::PinningData>
+        {
+            using value_t = Pinning::PinningData;
+        };
+
+        template <>
+        struct DataMapping<Data::Pins>
+        {
+            using value_t = std::vector<Pinning::Pin>;
+        };
+
+        template <>
+        struct DataMapping<Data::ConfigurationContext>
+        {
+            using value_t = ConfigurationContext;
+        };
+
+        template <>
+        struct DataMapping<Data::DownloadDirectory>
+        {
+            using value_t = std::filesystem::path;
+        };
+
+        template<>
+        struct DataMapping<Data::ModifyPath>
+        {
+            using value_t = std::string;
+        };
+
+        template<>
+        struct DataMapping<Data::RepairString>
+        {
+            using value_t = std::string;
+        };
+
+        template<>
+        struct DataMapping<Data::MsixDigests>
+        {
+            // The pair is { URL, Digest }
+            using value_t = std::vector<std::pair<std::string, std::wstring>>;
+        };
+
+        template<>
+        struct DataMapping<Data::InstallerDownloadAuthenticators>
+        {
+            // The authenticator map shared with sub contexts
+            using value_t = std::shared_ptr<std::map<Authentication::AuthenticationInfo, Authentication::Authenticator>>;
         };
     }
 }

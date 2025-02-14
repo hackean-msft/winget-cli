@@ -7,6 +7,7 @@ EXPORTS
     WinGetSQLiteIndexClose
     WinGetSQLiteIndexAddManifest
     WinGetSQLiteIndexUpdateManifest
+    WinGetSQLiteIndexAddOrUpdateManifest
     WinGetSQLiteIndexRemoveManifest
     WinGetSQLiteIndexPrepareForPackaging
     WinGetSQLiteIndexCheckConsistency
@@ -15,3 +16,11 @@ EXPORTS
     WinGetCompareVersions
     WinGetValidateManifestV2
     WinGetValidateManifestDependencies
+    WinGetCreateManifest
+    WinGetCloseManifest
+    WinGetValidateManifestV3
+    WinGetBeginInstallerMetadataCollection
+    WinGetCompleteInstallerMetadataCollection
+    WinGetMergeInstallerMetadata
+    WinGetSQLiteIndexMigrate
+    WinGetSQLiteIndexSetProperty

@@ -1,7 +1,13 @@
 ^attache$
+^bellow$
 benefitting
-occurence
+occurences?
+^dependan.*
+^diables?$
+^oer$
 Sorce
-^[Ss]pae
-^untill
-^wether
+^[Ss]pae.*
+^Teh$
+^untill$
+^untilling$
+^wether.*

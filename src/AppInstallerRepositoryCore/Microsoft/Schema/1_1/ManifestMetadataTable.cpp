@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 #include "pch.h"
 #include "ManifestMetadataTable.h"
-#include "SQLiteStatementBuilder.h"
+#include <winget/SQLiteStatementBuilder.h>
 
 
 namespace AppInstaller::Repository::Microsoft::Schema::V1_1
@@ -49,6 +49,14 @@ namespace AppInstaller::Repository::Microsoft::Schema::V1_1
         savepoint.Commit();
     }
 
+    void ManifestMetadataTable::Drop(SQLite::Connection& connection)
+    {
+        SQLite::Builder::StatementBuilder dropTableBuilder;
+        dropTableBuilder.DropTableIfExists(s_ManifestMetadataTable_Table_Name);
+
+        dropTableBuilder.Execute(connection);
+    }
+
     ISQLiteIndex::MetadataResult ManifestMetadataTable::GetMetadataByManifestId(const SQLite::Connection& connection, SQLite::rowid_t manifestId)
     {
         using namespace Builder;
@@ -66,6 +74,25 @@ namespace AppInstaller::Repository::Microsoft::Schema::V1_1
         }
 
         return result;
+    }
+
+    std::optional<std::string> ManifestMetadataTable::GetMetadataByManifestIdAndMetadata(const SQLite::Connection& connection, SQLite::rowid_t manifestId, PackageVersionMetadata metadata)
+    {
+        using namespace Builder;
+
+        StatementBuilder builder;
+        builder.Select(s_ManifestMetadataTable_Value_Column).From(s_ManifestMetadataTable_Table_Name).
+            Where(s_ManifestMetadataTable_Manifest_Column).Equals(manifestId).
+            And(s_ManifestMetadataTable_Metadata_Column).Equals(metadata);
+
+        Statement statement = builder.Prepare(connection);
+
+        if (statement.Step())
+        {
+            return statement.GetColumn<std::string>(0);
+        }
+
+        return {};
     }
 
     void ManifestMetadataTable::SetMetadataByManifestId(SQLite::Connection& connection, SQLite::rowid_t manifestId, PackageVersionMetadata metadata, std::string_view value)

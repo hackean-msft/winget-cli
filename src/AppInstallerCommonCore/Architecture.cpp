@@ -8,17 +8,58 @@
 
 namespace AppInstaller::Utility
 {
+    using namespace literals;
     namespace
     {
+        // IsWow64GuestMachineSupported() is available starting on Windows 10, version 1709 (RS3).
+        // We generally target a later version (version 1809, RS5), but the WinGetUtil is used in
+        // Azure Functions that run on version 1607 (RS1) where it is not available. So, we load and
+        // call this function only if available.
+        using IsWow64GuestMachineSupportedPtr = decltype(&IsWow64GuestMachineSupported);
+
+        struct IsWow64GuestMachineSupportedHelper
+        {
+            IsWow64GuestMachineSupportedHelper()
+            {
+                m_module.reset(LoadLibraryEx(L"api-ms-win-core-wow64-l1-1-2.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32));
+                if (!m_module)
+                {
+                    AICLI_LOG(Core, Verbose, << "Could not load api-ms-win-core-wow64-l1-1-2.dll");
+                    return;
+                }
+
+                m_isWow64GuestMachineSupported =
+                    reinterpret_cast<IsWow64GuestMachineSupportedPtr>(GetProcAddress(m_module.get(), "IsWow64GuestMachineSupported"));
+                if (!m_isWow64GuestMachineSupported)
+                {
+                    AICLI_LOG(Core, Verbose, << "Could not get proc address of IsWow64GuestMachineSupported");
+                    return;
+                }
+            }
+
+            void AddArchitectureIfGuestMachineSupported(std::vector<Architecture>& target, Architecture architecture, USHORT guestMachine)
+            {
+                if (m_isWow64GuestMachineSupported)
+                {
+                    BOOL supported = FALSE;
+                    LOG_IF_FAILED(m_isWow64GuestMachineSupported(guestMachine, &supported));
+
+                    if (supported)
+                    {
+                        target.push_back(architecture);
+                    }
+                }
+            }
+
+        private:
+            wil::unique_hmodule m_module;
+            IsWow64GuestMachineSupportedPtr m_isWow64GuestMachineSupported = nullptr;
+        };
+
         void AddArchitectureIfGuestMachineSupported(std::vector<Architecture>& target, Architecture architecture, USHORT guestMachine)
         {
-            BOOL supported = FALSE;
-            LOG_IF_FAILED(IsWow64GuestMachineSupported(guestMachine, &supported));
-            
-            if (supported)
-            {
-                target.push_back(architecture);
-            }
+            IsWow64GuestMachineSupportedHelper helper;
+            helper.AddArchitectureIfGuestMachineSupported(target, architecture, guestMachine);
         }
 
         // These types are defined in a future SDK and can be removed when we actually have them available.
@@ -75,6 +116,12 @@ namespace AppInstaller::Utility
             GetMachineTypeAttributesPtr m_getMachineTypeAttributes = nullptr;
         };
 
+        void AddArchitectureIfMachineTypeAttributesUserEnabled(std::vector<Architecture>& target, Architecture architecture, USHORT guestMachine)
+        {
+            GetMachineTypeAttributesHelper helper;
+            helper.AddArchitectureIfMachineTypeAttributesUserEnabled(target, architecture, guestMachine);
+        }
+
         // Gets the applicable architectures for the current machine.
         std::vector<Architecture> CreateApplicableArchitecturesVector()
         {
@@ -84,11 +131,9 @@ namespace AppInstaller::Utility
             {
             case Architecture::Arm64:
             {
-                GetMachineTypeAttributesHelper helper;
-
                 applicableArchs.push_back(Architecture::Arm64);
                 AddArchitectureIfGuestMachineSupported(applicableArchs, Architecture::Arm, IMAGE_FILE_MACHINE_ARMNT);
-                helper.AddArchitectureIfMachineTypeAttributesUserEnabled(applicableArchs, Architecture::X64, IMAGE_FILE_MACHINE_AMD64);
+                AddArchitectureIfMachineTypeAttributesUserEnabled(applicableArchs, Architecture::X64, IMAGE_FILE_MACHINE_AMD64);
                 AddArchitectureIfGuestMachineSupported(applicableArchs, Architecture::X86, IMAGE_FILE_MACHINE_I386);
                 applicableArchs.push_back(Architecture::Neutral);
             }
@@ -114,7 +159,7 @@ namespace AppInstaller::Utility
         }
     }
 
-    Architecture ConvertToArchitectureEnum(const std::string& archStr)
+    Architecture ConvertToArchitectureEnum(std::string_view archStr)
     {
         std::string arch = ToLower(archStr);
         if (arch == "x86")
@@ -138,49 +183,69 @@ namespace AppInstaller::Utility
             return Architecture::Neutral;
         }
 
-        AICLI_LOG(YAML, Info, << "ConvertToArchitectureEnum: Unknown architecture: " << archStr);
+        AICLI_LOG(Core, Info, << "ConvertToArchitectureEnum: Unknown architecture: " << archStr);
         return Architecture::Unknown;
     }
 
-    std::string_view ToString(Architecture architecture)
+    std::optional<::AppInstaller::Utility::Architecture> ConvertToArchitectureEnum(winrt::Windows::System::ProcessorArchitecture architecture)
+    {
+        switch (architecture)
+        {
+        case winrt::Windows::System::ProcessorArchitecture::X86:
+            return ::AppInstaller::Utility::Architecture::X86;
+        case winrt::Windows::System::ProcessorArchitecture::Arm:
+            return ::AppInstaller::Utility::Architecture::Arm;
+        case winrt::Windows::System::ProcessorArchitecture::X64:
+            return ::AppInstaller::Utility::Architecture::X64;
+        case winrt::Windows::System::ProcessorArchitecture::Neutral:
+            return ::AppInstaller::Utility::Architecture::Neutral;
+        case winrt::Windows::System::ProcessorArchitecture::Arm64:
+            return ::AppInstaller::Utility::Architecture::Arm64;
+        }
+
+        return {};
+    }
+
+    LocIndView ToString(Architecture architecture)
     {
         switch (architecture)
         {
         case Architecture::Neutral:
-            return "Neutral"sv;
+            return "Neutral"_liv;
         case Architecture::X86:
-            return "X86"sv;
+            return "X86"_liv;
         case Architecture::X64:
-            return "X64"sv;
+            return "X64"_liv;
         case Architecture::Arm:
-            return "Arm"sv;
+            return "Arm"_liv;
         case Architecture::Arm64:
-            return "Arm64"sv;
+            return "Arm64"_liv;
         }
 
-        return "Unknown"sv;
+        return "Unknown"_liv;
     }
 
     Architecture GetSystemArchitecture()
     {
         Architecture systemArchitecture = Architecture::Unknown;
 
-        SYSTEM_INFO systemInfo;
-        ZeroMemory(&systemInfo, sizeof(SYSTEM_INFO));
-        GetNativeSystemInfo(&systemInfo);
+        USHORT processArchitecture = IMAGE_FILE_MACHINE_UNKNOWN;
+        USHORT machineArchitecture = IMAGE_FILE_MACHINE_UNKNOWN;
+        // Just log the error if failed and return architecture Unknown.
+        LOG_IF_WIN32_BOOL_FALSE(IsWow64Process2(GetCurrentProcess(), &processArchitecture, &machineArchitecture));
 
-        switch (systemInfo.wProcessorArchitecture)
+        switch (machineArchitecture)
         {
-        case PROCESSOR_ARCHITECTURE_AMD64:
+        case IMAGE_FILE_MACHINE_AMD64:
             systemArchitecture = Architecture::X64;
             break;
-        case PROCESSOR_ARCHITECTURE_ARM:
+        case IMAGE_FILE_MACHINE_ARM:
             systemArchitecture = Architecture::Arm;
             break;
-        case PROCESSOR_ARCHITECTURE_ARM64:
+        case IMAGE_FILE_MACHINE_ARM64:
             systemArchitecture = Architecture::Arm64;
             break;
-        case PROCESSOR_ARCHITECTURE_INTEL:
+        case IMAGE_FILE_MACHINE_I386:
             systemArchitecture = Architecture::X86;
             break;
         }
@@ -192,6 +257,12 @@ namespace AppInstaller::Utility
     {
         static std::vector<Architecture> applicableArchs = CreateApplicableArchitecturesVector();
         return applicableArchs;
+    }
+
+    const std::vector<Architecture>& GetAllArchitectures()
+    {
+        static std::vector<Architecture> allArchs = { Architecture::Neutral, Architecture::X86, Architecture::X64, Architecture::Arm, Architecture::Arm64 };
+        return allArchs;
     }
 
     int IsApplicableArchitecture(Architecture arch)

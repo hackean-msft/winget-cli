@@ -1,10 +1,10 @@
-﻿// -----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // <copyright file="V1ManifestReadTest.cs" company="Microsoft Corporation">
-//     Copyright (c) Microsoft Corporation. All rights reserved.
+//     Copyright (c) Microsoft Corporation. Licensed under the MIT License.
 // </copyright>
-// -----------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
-namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
+namespace WinGetUtilInterop.UnitTests.ManifestUnitTest
 {
     using System.IO;
     using System.Reflection;
@@ -31,8 +31,12 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
 
         private enum TestManifestVersion
         {
-            V100,
-            V110,
+            V1_0_0,
+            V1_1_0,
+            V1_6_0,
+            V1_7_0,
+            V1_9_0,
+            V1_10_0,
         }
 
         /// <summary>
@@ -42,15 +46,35 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
         [DisplayTestMethodName]
         public void ReadV1ManifestsAndVerifyContents()
         {
-            Manifest v100manifest = Manifest.CreateManifestFromPath(
-                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V100ManifestMerged));
+            Manifest v1_0_0manifest = Manifest.CreateManifestFromPath(
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V1_0_0ManifestMerged));
 
-            this.ValidateManifestFields(v100manifest, TestManifestVersion.V100);
+            this.ValidateManifestFields(v1_0_0manifest, TestManifestVersion.V1_0_0);
 
-            Manifest v110manifest = Manifest.CreateManifestFromPath(
-                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V110ManifestMerged));
+            Manifest v1_1_0manifest = Manifest.CreateManifestFromPath(
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V1_1_0ManifestMerged));
 
-            this.ValidateManifestFields(v110manifest, TestManifestVersion.V110);
+            this.ValidateManifestFields(v1_1_0manifest, TestManifestVersion.V1_1_0);
+
+            Manifest v1_6_0manifest = Manifest.CreateManifestFromPath(
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V1_6_0ManifestMerged));
+
+            this.ValidateManifestFields(v1_6_0manifest, TestManifestVersion.V1_6_0);
+
+            Manifest v1_7_0manifest = Manifest.CreateManifestFromPath(
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V1_7_0ManifestMerged));
+
+            this.ValidateManifestFields(v1_7_0manifest, TestManifestVersion.V1_7_0);
+
+            Manifest v1_9_0manifest = Manifest.CreateManifestFromPath(
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V1_9_0ManifestMerged));
+
+            this.ValidateManifestFields(v1_9_0manifest, TestManifestVersion.V1_9_0);
+
+            Manifest v1_10_0manifest = Manifest.CreateManifestFromPath(
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "TestCollateral", ManifestStrings.V1_10_0ManifestMerged));
+
+            this.ValidateManifestFields(v1_10_0manifest, TestManifestVersion.V1_10_0);
         }
 
         /// <summary>
@@ -110,7 +134,7 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
             Assert.Equal("appxsdk", manifest.Tags[0]);
             Assert.Equal("msixsdk", manifest.Tags[1]);
 
-            if (manifestVersion >= TestManifestVersion.V110)
+            if (manifestVersion >= TestManifestVersion.V1_1_0)
             {
                 Assert.Equal("Default release notes", manifest.ReleaseNotes);
                 Assert.Equal("https://DefaultReleaseNotes.net", manifest.ReleaseNotesUrl);
@@ -120,12 +144,34 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
                 Assert.Equal("https://DefaultAgreementUrl.net", manifest.Agreements[0].AgreementUrl);
             }
 
+            if (manifestVersion >= TestManifestVersion.V1_6_0)
+            {
+                Assert.Equal("Default installation notes", manifest.InstallationNotes);
+                Assert.Equal("https://DefaultPurchaseUrl.com", manifest.PurchaseUrl);
+
+                Assert.Single(manifest.Documentations);
+                ManifestDocumentation manifestDocumentation = manifest.Documentations[0];
+
+                Assert.Equal("Default document label", manifestDocumentation.DocumentLabel);
+                Assert.Equal("https://DefaultDocumentUrl.com", manifestDocumentation.DocumentUrl);
+
+                Assert.Single(manifest.Icons);
+                ManifestIcon icon = manifest.Icons[0];
+
+                Assert.Equal("69D84CA8899800A5575CE31798293CD4FEBAB1D734A07C2E51E56A28E0DF8123", icon.IconSha256);
+                Assert.Equal("default", icon.IconTheme);
+                Assert.Equal("https://testIcon", icon.IconUrl);
+                Assert.Equal("custom", icon.IconResolution);
+                Assert.Equal("ico", icon.IconFileType);
+            }
+
             // Default installer
             Assert.Equal("en-US", manifest.InstallerLocale);
             Assert.Equal(2, manifest.Platform.Count);
             Assert.Equal("Windows.Desktop", manifest.Platform[0]);
             Assert.Equal("Windows.Universal", manifest.Platform[1]);
             Assert.Equal("10.0.0.0", manifest.MinimumOSVersion);
+
             Assert.Equal("zip", manifest.InstallerType);
             Assert.Equal("machine", manifest.Scope);
             Assert.Equal(3, manifest.InstallModes.Count);
@@ -175,7 +221,7 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
             Assert.Equal("Microsoft.DesktopAppInstaller_8wekyb3d8bbwe", manifest.PackageFamilyName);
             Assert.Equal("{Foo}", manifest.ProductCode);
 
-            if (manifestVersion >= TestManifestVersion.V110)
+            if (manifestVersion >= TestManifestVersion.V1_1_0)
             {
                 Assert.Equal("2021-01-01", manifest.ReleaseDate);
                 Assert.True(manifest.InstallerAbortsTerminal);
@@ -193,11 +239,60 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
                 Assert.Equal("exe", manifest.AppsAndFeaturesEntries[0].InstallerType);
                 Assert.Single(manifest.Markets.AllowedMarkets);
                 Assert.Equal("US", manifest.Markets.AllowedMarkets[0]);
-                Assert.Single(manifest.ExpectedReturnCodes);
-                Assert.Equal(10, manifest.ExpectedReturnCodes[0].InstallerReturnCode);
-                Assert.Equal("packageInUse", manifest.ExpectedReturnCodes[0].ReturnResponse);
+                Assert.Equal(2, manifest.ExpectedReturnCodes.Count);
+                Assert.Equal(2, manifest.ExpectedReturnCodes[0].InstallerReturnCode);
+                Assert.Equal("contactSupport", manifest.ExpectedReturnCodes[0].ReturnResponse);
             }
 
+            if (manifestVersion >= TestManifestVersion.V1_6_0)
+            {
+                Assert.Equal("msi", manifest.NestedInstallerType);
+                Assert.Single(manifest.NestedInstallerFiles);
+                InstallerNestedInstallerFile installerNestedInstallerFile = manifest.NestedInstallerFiles[0];
+                Assert.Equal("RelativeFilePath", installerNestedInstallerFile.RelativeFilePath);
+                Assert.Equal("PortableCommandAlias", installerNestedInstallerFile.PortableCommandAlias);
+
+                InstallerInstallationMetadata installerInstallationMetadata = manifest.InstallationMetadata;
+                Assert.Equal("%ProgramFiles%\\TestApp", installerInstallationMetadata.DefaultInstallLocation);
+                Assert.Single(installerInstallationMetadata.Files);
+
+                ManifestInstallerFile installerFile = installerInstallationMetadata.Files[0];
+                Assert.Equal("main.exe", installerFile.RelativeFilePath);
+                Assert.Equal("DisplayName", installerFile.DisplayName);
+                Assert.Equal("/arg", installerFile.InvocationParameter);
+                Assert.Equal("69D84CA8899800A5575CE31798293CD4FEBAB1D734A07C2E51E56A28E0DF8C82", installerFile.FileSha256);
+
+                Assert.Single(manifest.UnsupportedArguments);
+                Assert.Equal("log", manifest.UnsupportedArguments[0]);
+
+                Assert.Single(manifest.UnsupportedOSArchitectures);
+                Assert.Equal("arm", manifest.UnsupportedOSArchitectures[0]);
+
+                Assert.True(manifest.DisplayInstallWarnings);
+                Assert.True(manifest.DownloadCommandProhibited);
+
+                Assert.Equal("https://defaultReturnResponseUrl.com", manifest.ExpectedReturnCodes[0].ReturnResponseUrl);
+            }
+
+            if (manifestVersion >= TestManifestVersion.V1_7_0)
+            {
+                Assert.Equal("/repair", defaultSwitches.Repair);
+                Assert.Equal("uninstaller", manifest.RepairBehavior);
+            }
+
+            if (manifestVersion >= TestManifestVersion.V1_9_0)
+            {
+                Assert.True(manifest.ArchiveBinariesDependOnPath);
+            }
+
+            if (manifestVersion >= TestManifestVersion.V1_10_0)
+            {
+                Assert.Equal("microsoftEntraId", manifest.Authentication.AuthenticationType);
+                Assert.Equal("DefaultResource", manifest.Authentication.MicrosoftEntraIdAuthenticationInfo.Resource);
+                Assert.Equal("DefaultScope", manifest.Authentication.MicrosoftEntraIdAuthenticationInfo.Scope);
+            }
+
+            // Individual installers
             Assert.Equal(2, manifest.Installers.Count);
             ManifestInstaller installer1 = manifest.Installers[0];
             Assert.Equal("x86", installer1.Arch);
@@ -250,7 +345,7 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
             Assert.Equal("runFullTrustPreview", installer1.RestrictedCapabilities[0]);
             Assert.Equal("Microsoft.DesktopAppInstallerPreview_8wekyb3d8bbwe", installer1.PackageFamilyName);
 
-            if (manifestVersion >= TestManifestVersion.V110)
+            if (manifestVersion >= TestManifestVersion.V1_1_0)
             {
                 Assert.Equal("2021-02-02", installer1.ReleaseDate);
                 Assert.True(!installer1.InstallerAbortsTerminal);
@@ -273,7 +368,50 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
             Assert.Equal("69D84CA8899800A5575CE31798293CD4FEBAB1D734A07C2E51E56A28E0DF8C82", installer2.Sha256);
             Assert.Equal("{Bar}", installer2.ProductCode);
 
-            // Localization
+            if (manifestVersion >= TestManifestVersion.V1_6_0)
+            {
+                Assert.Single(installer1.InstallationMetadata.Files);
+                ManifestInstallerFile installerFile2 = installer1.InstallationMetadata.Files[0];
+                Assert.Equal("main2.exe", installerFile2.RelativeFilePath);
+                Assert.Equal("DisplayName2", installerFile2.DisplayName);
+                Assert.Equal("/arg2", installerFile2.InvocationParameter);
+                Assert.Equal("79D84CA8899800A5575CE31798293CD4FEBAB1D734A07C2E51E56A28E0DF8C82", installerFile2.FileSha256);
+
+                Assert.Equal("msi", installer1.NestedInstallerType);
+
+                InstallerNestedInstallerFile installerNestedInstallerFile2 = installer1.NestedInstallerFiles[0];
+                Assert.Equal("RelativeFilePath2", installerNestedInstallerFile2.RelativeFilePath);
+                Assert.Equal("PortableCommandAlias2", installerNestedInstallerFile2.PortableCommandAlias);
+
+                Assert.Single(installer1.UnsupportedArguments);
+                Assert.Equal("location", installer1.UnsupportedArguments[0]);
+
+                Assert.True(installer1.DisplayInstallWarnings);
+                Assert.True(installer1.DownloadCommandProhibited);
+
+                Assert.Equal("https://returnResponseUrl.com", installer1.ExpectedReturnCodes[0].ReturnResponseUrl);
+            }
+
+            if (manifestVersion >= TestManifestVersion.V1_7_0)
+            {
+                Assert.Equal("/r", installer1Switches.Repair);
+                Assert.Equal("modify", installer1.RepairBehavior);
+            }
+
+            if (manifestVersion >= TestManifestVersion.V1_9_0)
+            {
+                Assert.False(installer1.ArchiveBinariesDependOnPath);
+                Assert.Equal("fakeIdentifier", installer2.ProductId);
+            }
+
+            if (manifestVersion >= TestManifestVersion.V1_10_0)
+            {
+                Assert.Equal("microsoftEntraId", installer1.Authentication.AuthenticationType);
+                Assert.Equal("Resource", installer1.Authentication.MicrosoftEntraIdAuthenticationInfo.Resource);
+                Assert.Equal("Scope", installer1.Authentication.MicrosoftEntraIdAuthenticationInfo.Scope);
+            }
+
+            // Additional Localizations
             Assert.Single(manifest.Localization);
             ManifestLocalization localization1 = manifest.Localization[0];
             Assert.Equal("en-GB", localization1.PackageLocale);
@@ -294,7 +432,7 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
             Assert.Equal("appxsdkUK", localization1.Tags[0]);
             Assert.Equal("msixsdkUK", localization1.Tags[1]);
 
-            if (manifestVersion >= TestManifestVersion.V110)
+            if (manifestVersion >= TestManifestVersion.V1_1_0)
             {
                 Assert.Equal("Release notes", localization1.ReleaseNotes);
                 Assert.Equal("https://ReleaseNotes.net", localization1.ReleaseNotesUrl);
@@ -303,6 +441,27 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
                 Assert.Equal("Text", localization1.Agreements[0].Agreement);
                 Assert.Equal("https://AgreementUrl.net", localization1.Agreements[0].AgreementUrl);
             }
+
+            if (manifestVersion >= TestManifestVersion.V1_6_0)
+            {
+                Assert.Equal("Installation notes", localization1.InstallationNotes);
+                Assert.Equal("https://PurchaseUrl.com", localization1.PurchaseUrl);
+
+                Assert.Single(localization1.Documentations);
+                ManifestDocumentation manifestDocumentation = localization1.Documentations[0];
+
+                Assert.Equal("Document label", manifestDocumentation.DocumentLabel);
+                Assert.Equal("https://DocumentUrl.com", manifestDocumentation.DocumentUrl);
+
+                Assert.Single(localization1.Icons);
+                ManifestIcon icon = localization1.Icons[0];
+
+                Assert.Equal("69D84CA8899800A5575CE31798293CD4FEBAB1D734A07C2E51E56A28E0DF8321", icon.IconSha256);
+                Assert.Equal("dark", icon.IconTheme);
+                Assert.Equal("https://testIcon2", icon.IconUrl);
+                Assert.Equal("32x32", icon.IconResolution);
+                Assert.Equal("png", icon.IconFileType);
+            }
         }
 
         /// <summary>
@@ -310,15 +469,37 @@ namespace Microsoft.WinGetUtil.UnitTests.ManifestUnitTest
         /// </summary>
         internal class ManifestStrings
         {
+#pragma warning disable SA1310 // FieldNamesMustNotContainUnderscore
             /// <summary>
             /// Merged v1 manifest.
             /// </summary>
-            public const string V100ManifestMerged = "V1ManifestMerged.yaml";
+            public const string V1_0_0ManifestMerged = "V1ManifestMerged.yaml";
 
             /// <summary>
             /// Merged v1.1 manifest.
             /// </summary>
-            public const string V110ManifestMerged = "V1_1ManifestMerged.yaml";
+            public const string V1_1_0ManifestMerged = "V1_1ManifestMerged.yaml";
+
+            /// <summary>
+            /// Merged v1.6 manifest.
+            /// </summary>
+            public const string V1_6_0ManifestMerged = "V1_6ManifestMerged.yaml";
+
+            /// <summary>
+            /// Merged v1.7 manifest.
+            /// </summary>
+            public const string V1_7_0ManifestMerged = "V1_7ManifestMerged.yaml";
+
+            /// <summary>
+            /// Merged v1.9 manifest.
+            /// </summary>
+            public const string V1_9_0ManifestMerged = "V1_9ManifestMerged.yaml";
+
+            /// <summary>
+            /// Merged v1.10 manifest.
+            /// </summary>
+            public const string V1_10_0ManifestMerged = "V1_10ManifestMerged.yaml";
+#pragma warning restore SA1310 // FieldNamesMustNotContainUnderscore
 
             /// <summary>
             /// Merged v1 manifest without localization.

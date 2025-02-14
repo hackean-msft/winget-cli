@@ -47,6 +47,8 @@ namespace winrt::Microsoft::Management::Deployment::implementation
     }
     winrt::Windows::Foundation::IAsyncOperation<winrt::Microsoft::Management::Deployment::FindPackagesResult> PackageCatalog::FindPackagesAsync(winrt::Microsoft::Management::Deployment::FindPackagesOptions options)
     {
+        auto strong_this = get_strong();
+        co_await resume_background();
         co_return FindPackages(options);
     }
 
@@ -115,13 +117,12 @@ namespace winrt::Microsoft::Management::Deployment::implementation
             winrt::Microsoft::Management::Deployment::implementation::FindPackagesResult>>();
         // TODO: Add search timeout and error code.
         winrt::Microsoft::Management::Deployment::FindPackagesResultStatus status = FindPackagesResultStatus(hr);
-        findPackagesResult->Initialize(status, isTruncated, matches);
+        findPackagesResult->Initialize(status, isTruncated, matches, hr);
         return *findPackagesResult;
     }
 
     winrt::Microsoft::Management::Deployment::FindPackagesResult PackageCatalog::FindPackages(winrt::Microsoft::Management::Deployment::FindPackagesOptions const& options)
     {
-        winrt::Microsoft::Management::Deployment::FindPackagesResultStatus::Ok;
         bool isTruncated = false;
         Windows::Foundation::Collections::IVector<Microsoft::Management::Deployment::MatchResult> matches{ winrt::single_threaded_vector<Microsoft::Management::Deployment::MatchResult>() };
         ::AppInstaller::Repository::SearchRequest searchRequest;

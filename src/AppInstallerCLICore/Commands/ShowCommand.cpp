@@ -9,12 +9,15 @@
 
 namespace AppInstaller::CLI
 {
+    using namespace AppInstaller::CLI::Execution;
+    using namespace AppInstaller::CLI::Workflow;
+
     std::vector<Argument> ShowCommand::GetArguments() const
     {
         return {
             Argument::ForType(Execution::Args::Type::Query),
             // The manifest argument from Argument::ForType can be blocked by Group Policy but we don't want that here
-            Argument{ "manifest", 'm', Execution::Args::Type::Manifest, Resource::String::ManifestArgumentDescription, ArgumentType::Standard, Argument::Visibility::Help },
+            Argument{ Execution::Args::Type::Manifest, Resource::String::ManifestArgumentDescription, ArgumentType::Standard, Argument::Visibility::Help },
             Argument::ForType(Execution::Args::Type::Id),
             Argument::ForType(Execution::Args::Type::Name),
             Argument::ForType(Execution::Args::Type::Moniker),
@@ -22,8 +25,14 @@ namespace AppInstaller::CLI
             Argument::ForType(Execution::Args::Type::Channel),
             Argument::ForType(Execution::Args::Type::Source),
             Argument::ForType(Execution::Args::Type::Exact),
+            Argument{ Args::Type::InstallScope, Resource::String::InstallScopeDescription, ArgumentType::Standard, Argument::Visibility::Help },
+            Argument::ForType(Execution::Args::Type::InstallerArchitecture),
+            Argument::ForType(Execution::Args::Type::InstallerType),
+            Argument::ForType(Execution::Args::Type::Locale),
             Argument::ForType(Execution::Args::Type::ListVersions),
             Argument::ForType(Execution::Args::Type::CustomHeader),
+            Argument::ForType(Execution::Args::Type::AuthenticationMode),
+            Argument::ForType(Execution::Args::Type::AuthenticationAccount),
             Argument::ForType(Execution::Args::Type::AcceptSourceAgreements),
         };
     }
@@ -40,13 +49,29 @@ namespace AppInstaller::CLI
 
     void ShowCommand::Complete(Execution::Context& context, Execution::Args::Type valueType) const
     {
-        context <<
-            Workflow::CompleteWithSingleSemanticsForValue(valueType);
+        switch (valueType)
+        {
+        case Args::Type::InstallerArchitecture:
+        case Args::Type::Locale:
+            // May well move to CompleteWithSingleSemanticsForValue,
+            // but for now output nothing.
+            context <<
+                Workflow::CompleteWithEmptySet;
+            break;
+        default:
+            context <<
+                Workflow::CompleteWithSingleSemanticsForValue(valueType);
+        }
     }
 
-    std::string ShowCommand::HelpLink() const
+    Utility::LocIndView ShowCommand::HelpLink() const
     {
-        return "https://aka.ms/winget-command-show";
+        return "https://aka.ms/winget-command-show"_liv;
+    }
+
+    void ShowCommand::ValidateArgumentsInternal(Args& execArgs) const
+    {
+        Argument::ValidateCommonArguments(execArgs);
     }
 
     void ShowCommand::ExecuteInternal(Execution::Context& context) const
@@ -68,7 +93,7 @@ namespace AppInstaller::CLI
                     Workflow::OpenSource() <<
                     Workflow::SearchSourceForSingle <<
                     Workflow::HandleSearchResultFailures <<
-                    Workflow::EnsureOneMatchFromSearchResult(false) <<
+                    Workflow::EnsureOneMatchFromSearchResult(OperationType::Show) <<
                     Workflow::ReportPackageIdentity <<
                     Workflow::ShowAppVersions;
             }
@@ -76,7 +101,7 @@ namespace AppInstaller::CLI
         else
         {
             context <<
-                Workflow::GetManifest <<
+                GetManifest( /* considerPins */ false) <<
                 Workflow::ReportManifestIdentity <<
                 Workflow::SelectInstaller <<
                 Workflow::ShowManifestInfo;

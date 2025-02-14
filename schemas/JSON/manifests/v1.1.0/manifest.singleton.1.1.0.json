@@ -86,7 +86,6 @@
         "msi",
         "appx",
         "exe",
-        "zip",
         "inno",
         "nullsoft",
         "wix",
@@ -188,6 +187,7 @@
       "type": [ "array", "null" ],
       "items": {
         "type": "object",
+        "title": "ExpectedReturnCode",
         "properties": {
           "InstallerReturnCode": {
             "$ref": "#/definitions/InstallerReturnCode"
@@ -212,7 +212,8 @@
               "blockedByPolicy"
             ]
           }
-        }
+        },
+        "required": [ "InstallerReturnCode", "ReturnResponse" ]
       },
       "maxItems": 128,
       "description": "Installer exit codes for common errors"
@@ -405,6 +406,7 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
+        "title": "UnsupportedOSArchitecture",
         "enum": [
           "x86",
           "x64",

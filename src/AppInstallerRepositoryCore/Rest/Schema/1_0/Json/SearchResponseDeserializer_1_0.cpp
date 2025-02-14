@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #include "pch.h"
+#include "Rest/Schema/CommonRestConstants.h"
 #include "Rest/Schema/IRestClient.h"
 #include "SearchResponseDeserializer.h"
-#include "Rest/Schema/JsonHelper.h"
-#include "Rest/Schema/RestHelper.h"
-#include "Rest/Schema/CommonRestConstants.h"
+#include <winget/JsonUtil.h>
+#include <winget/Rest.h>
 
 namespace AppInstaller::Repository::Rest::Schema::V1_0::Json
 {
@@ -43,7 +43,7 @@ namespace AppInstaller::Repository::Rest::Schema::V1_0::Json
         IRestClient::SearchResult result;
         try
         {
-            std::optional<std::reference_wrapper<const web::json::array>> dataArray = JsonHelper::GetRawJsonArrayFromJsonNode(searchResponseObject, JsonHelper::GetUtilityString(Data));
+            std::optional<std::reference_wrapper<const web::json::array>> dataArray = JSON::GetRawJsonArrayFromJsonNode(searchResponseObject, JSON::GetUtilityString(Data));
             if (!dataArray || dataArray.value().get().size() == 0)
             {
                 AICLI_LOG(Repo, Verbose, << "No search results returned.");
@@ -52,36 +52,31 @@ namespace AppInstaller::Repository::Rest::Schema::V1_0::Json
 
             for (auto& manifestItem : dataArray.value().get())
             {
-                std::optional<std::string> packageId = JsonHelper::GetRawStringValueFromJsonNode(manifestItem, JsonHelper::GetUtilityString(PackageIdentifier));
-                std::optional<std::string> packageName = JsonHelper::GetRawStringValueFromJsonNode(manifestItem, JsonHelper::GetUtilityString(PackageName));
-                std::optional<std::string> publisher = JsonHelper::GetRawStringValueFromJsonNode(manifestItem, JsonHelper::GetUtilityString(Publisher));
+                std::optional<std::string> packageId = JSON::GetRawStringValueFromJsonNode(manifestItem, JSON::GetUtilityString(PackageIdentifier));
+                std::optional<std::string> packageName = JSON::GetRawStringValueFromJsonNode(manifestItem, JSON::GetUtilityString(PackageName));
+                std::optional<std::string> publisher = JSON::GetRawStringValueFromJsonNode(manifestItem, JSON::GetUtilityString(Publisher));
 
-                if (!JsonHelper::IsValidNonEmptyStringValue(packageId) || !JsonHelper::IsValidNonEmptyStringValue(packageName) || !JsonHelper::IsValidNonEmptyStringValue(publisher))
+                if (!JSON::IsValidNonEmptyStringValue(packageId) || !JSON::IsValidNonEmptyStringValue(packageName) || !JSON::IsValidNonEmptyStringValue(publisher))
                 {
                     AICLI_LOG(Repo, Error, << "Missing required package fields in manifest search results.");
                     return {};
                 }
 
-                std::optional<std::reference_wrapper<const web::json::array>> versionValue = JsonHelper::GetRawJsonArrayFromJsonNode(manifestItem, JsonHelper::GetUtilityString(Versions));
+                std::optional<std::reference_wrapper<const web::json::array>> versionValue = JSON::GetRawJsonArrayFromJsonNode(manifestItem, JSON::GetUtilityString(Versions));
                 std::vector<IRestClient::VersionInfo> versionList;
 
                 if (versionValue)
                 {
                     for (auto& versionItem : versionValue.value().get())
                     {
-                        std::optional<std::string> version = JsonHelper::GetRawStringValueFromJsonNode(versionItem, JsonHelper::GetUtilityString(PackageVersion));
-                        if (!JsonHelper::IsValidNonEmptyStringValue(version))
+                        auto versionInfo = DeserializeVersionInfo(versionItem);
+                        if (!versionInfo.has_value())
                         {
                             AICLI_LOG(Repo, Error, << "Received incomplete package version in package: " << packageId.value());
                             return {};
                         }
 
-                        std::string channel = JsonHelper::GetRawStringValueFromJsonNode(versionItem, JsonHelper::GetUtilityString(Channel)).value_or("");
-                        std::vector<std::string> packageFamilyNames = RestHelper::GetUniqueItems(JsonHelper::GetRawStringArrayFromJsonNode(versionItem, JsonHelper::GetUtilityString(PackageFamilyNames)));
-                        std::vector<std::string> productCodes = RestHelper::GetUniqueItems(JsonHelper::GetRawStringArrayFromJsonNode(versionItem, JsonHelper::GetUtilityString(ProductCodes)));
-
-                        versionList.emplace_back(IRestClient::VersionInfo{
-                                AppInstaller::Utility::VersionAndChannel{std::move(version.value()), std::move(channel)}, {}, std::move(packageFamilyNames), std::move(productCodes)});
+                        versionList.emplace_back(std::move(*versionInfo));
                     }
                 }
 
@@ -109,5 +104,25 @@ namespace AppInstaller::Repository::Rest::Schema::V1_0::Json
         }
 
         return {};
+    }
+
+    std::optional<IRestClient::VersionInfo> SearchResponseDeserializer::DeserializeVersionInfo(const web::json::value& versionInfoJsonObject) const
+    {
+        std::optional<std::string> version = JSON::GetRawStringValueFromJsonNode(versionInfoJsonObject, JSON::GetUtilityString(PackageVersion));
+        if (!JSON::IsValidNonEmptyStringValue(version))
+        {
+            AICLI_LOG(Repo, Error, << "Received incomplete package version");
+            return {};
+        }
+
+        std::string channel = JSON::GetRawStringValueFromJsonNode(versionInfoJsonObject, JSON::GetUtilityString(Channel)).value_or("");
+        std::vector<std::string> packageFamilyNames = AppInstaller::Rest::GetUniqueItems(JSON::GetRawStringArrayFromJsonNode(versionInfoJsonObject, JSON::GetUtilityString(PackageFamilyNames)));
+        std::vector<std::string> productCodes = AppInstaller::Rest::GetUniqueItems(JSON::GetRawStringArrayFromJsonNode(versionInfoJsonObject, JSON::GetUtilityString(ProductCodes)));
+
+        return IRestClient::VersionInfo{
+            AppInstaller::Utility::VersionAndChannel{std::move(version.value()), std::move(channel)},
+            {},
+            std::move(packageFamilyNames),
+            std::move(productCodes) };
     }
 }

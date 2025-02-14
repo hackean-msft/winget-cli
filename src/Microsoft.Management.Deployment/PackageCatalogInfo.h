@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 #pragma once
 #include "PackageCatalogInfo.g.h"
+#include <winget/RepositorySource.h>
 
 namespace winrt::Microsoft::Management::Deployment::implementation
 {
@@ -21,6 +22,7 @@ namespace winrt::Microsoft::Management::Deployment::implementation
         winrt::Windows::Foundation::DateTime LastUpdateTime();
         winrt::Microsoft::Management::Deployment::PackageCatalogOrigin Origin();
         winrt::Microsoft::Management::Deployment::PackageCatalogTrustLevel TrustLevel();
+        bool Explicit();
 
 #if !defined(INCLUDE_ONLY_INTERFACE_METHODS)
     private:

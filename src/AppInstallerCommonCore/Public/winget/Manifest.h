@@ -3,6 +3,7 @@
 #pragma once
 #include <AppInstallerStrings.h>
 #include <AppInstallerSHA256.h>
+#include <AppInstallerVersions.h>
 #include <winget/ManifestInstaller.h>
 #include <winget/ManifestLocalization.h>
 
@@ -45,7 +46,30 @@ namespace AppInstaller::Manifest
         // Get all commands across installers
         std::vector<string_t> GetAggregatedCommands() const;
 
+        // Gets ARP version range if declared, otherwise an empty range is returned
+        Utility::VersionRange GetArpVersionRange() const;
+
+        // Get package family names across installers, Case folded.
+        std::vector<string_t> GetPackageFamilyNames() const;
+
+        // Get product codes across installers, Case folded.
+        std::vector<string_t> GetProductCodes() const;
+
+        // Get upgrade codes across installers, Case folded.
+        std::vector<string_t> GetUpgradeCodes() const;
+
+        // Get package names across localizations and installers, Case folded.
+        std::vector<string_t> GetPackageNames() const;
+
+        // Get publishers across localizations and installers, Case folded.
+        std::vector<string_t> GetPublishers() const;
+
         // If not empty, the SHA256 hash of the manifest stream itself.
         Utility::SHA256::HashBuffer StreamSha256;
+
+    private:
+        std::vector<string_t> GetSystemReferenceStrings(
+            std::function<const string_t& (const ManifestInstaller&)> extractStringFromInstaller = {},
+            std::function<const string_t& (const AppsAndFeaturesEntry&)> extractStringFromAppsAndFeaturesEntry = {}) const;
     };
 }

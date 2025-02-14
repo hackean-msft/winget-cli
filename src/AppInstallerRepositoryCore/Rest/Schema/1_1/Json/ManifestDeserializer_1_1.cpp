@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 #include "pch.h"
 #include "ManifestDeserializer.h"
-#include "Rest/Schema/JsonHelper.h"
+#include <winget/JsonUtil.h>
 
 using namespace AppInstaller::Manifest;
 
@@ -41,6 +41,31 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
         constexpr std::string_view AgreementUrl = "AgreementUrl"sv;
     }
 
+    std::vector<Manifest::AppsAndFeaturesEntry> ManifestDeserializer::DeserializeAppsAndFeaturesEntries(const web::json::array& entries) const
+    {
+        std::vector<Manifest::AppsAndFeaturesEntry> result;
+
+        for (auto& arpEntryNode : entries)
+        {
+            AppsAndFeaturesEntry arpEntry;
+            arpEntry.DisplayName = JSON::GetRawStringValueFromJsonNode(arpEntryNode, JSON::GetUtilityString(DisplayName)).value_or("");
+            arpEntry.Publisher = JSON::GetRawStringValueFromJsonNode(arpEntryNode, JSON::GetUtilityString(Publisher)).value_or("");
+            arpEntry.DisplayVersion = JSON::GetRawStringValueFromJsonNode(arpEntryNode, JSON::GetUtilityString(DisplayVersion)).value_or("");
+            arpEntry.ProductCode = JSON::GetRawStringValueFromJsonNode(arpEntryNode, JSON::GetUtilityString(ProductCode)).value_or("");
+            arpEntry.UpgradeCode = JSON::GetRawStringValueFromJsonNode(arpEntryNode, JSON::GetUtilityString(UpgradeCode)).value_or("");
+            arpEntry.InstallerType = ConvertToInstallerType(JSON::GetRawStringValueFromJsonNode(arpEntryNode, JSON::GetUtilityString(InstallerType)).value_or(""));
+
+            // Only add when at least one field is valid
+            if (!arpEntry.DisplayName.empty() || !arpEntry.Publisher.empty() || !arpEntry.DisplayVersion.empty() ||
+                !arpEntry.ProductCode.empty() || !arpEntry.UpgradeCode.empty() || arpEntry.InstallerType != InstallerTypeEnum::Unknown)
+            {
+                result.emplace_back(std::move(arpEntry));
+            }
+        }
+
+        return result;
+    }
+
     Manifest::InstallerTypeEnum ManifestDeserializer::ConvertToInstallerType(std::string_view in) const
     {
         std::string inStrLower = Utility::ToLower(in);
@@ -50,7 +75,83 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
             return InstallerTypeEnum::MSStore;
         }
 
-        return V1_0::Json::ManifestDeserializer::ConvertToInstallerType(in);
+        return V1_0::Json::ManifestDeserializer::ConvertToInstallerType(inStrLower);
+    }
+
+    Manifest::ExpectedReturnCodeEnum ManifestDeserializer::ConvertToExpectedReturnCodeEnum(std::string_view in) const
+    {
+        std::string inStrLower = Utility::ToLower(in);
+        ExpectedReturnCodeEnum result = ExpectedReturnCodeEnum::Unknown;
+
+        if (inStrLower == "packageinuse")
+        {
+            result = ExpectedReturnCodeEnum::PackageInUse;
+        }
+        else if (inStrLower == "installinprogress")
+        {
+            result = ExpectedReturnCodeEnum::InstallInProgress;
+        }
+        else if (inStrLower == "fileinuse")
+        {
+            result = ExpectedReturnCodeEnum::FileInUse;
+        }
+        else if (inStrLower == "missingdependency")
+        {
+            result = ExpectedReturnCodeEnum::MissingDependency;
+        }
+        else if (inStrLower == "diskfull")
+        {
+            result = ExpectedReturnCodeEnum::DiskFull;
+        }
+        else if (inStrLower == "insufficientmemory")
+        {
+            result = ExpectedReturnCodeEnum::InsufficientMemory;
+        }
+        else if (inStrLower == "nonetwork")
+        {
+            result = ExpectedReturnCodeEnum::NoNetwork;
+        }
+        else if (inStrLower == "contactsupport")
+        {
+            result = ExpectedReturnCodeEnum::ContactSupport;
+        }
+        else if (inStrLower == "rebootrequiredtofinish")
+        {
+            result = ExpectedReturnCodeEnum::RebootRequiredToFinish;
+        }
+        else if (inStrLower == "rebootrequiredforinstall")
+        {
+            result = ExpectedReturnCodeEnum::RebootRequiredForInstall;
+        }
+        else if (inStrLower == "rebootinitiated")
+        {
+            result = ExpectedReturnCodeEnum::RebootInitiated;
+        }
+        else if (inStrLower == "cancelledbyuser")
+        {
+            result = ExpectedReturnCodeEnum::CancelledByUser;
+        }
+        else if (inStrLower == "alreadyinstalled")
+        {
+            result = ExpectedReturnCodeEnum::AlreadyInstalled;
+        }
+        else if (inStrLower == "downgrade")
+        {
+            result = ExpectedReturnCodeEnum::Downgrade;
+        }
+        else if (inStrLower == "blockedbypolicy")
+        {
+            result = ExpectedReturnCodeEnum::BlockedByPolicy;
+        }
+
+        return result;
+    }
+
+    Manifest::ManifestInstaller::ExpectedReturnCodeInfo ManifestDeserializer::DeserializeExpectedReturnCodeInfo(const web::json::value& expectedReturnCodeJsonObject) const
+    {
+        ExpectedReturnCodeEnum returnResponse = ConvertToExpectedReturnCodeEnum(JSON::GetRawStringValueFromJsonNode(expectedReturnCodeJsonObject, JSON::GetUtilityString(ReturnResponse)).value_or(""));
+        
+        return { returnResponse, "" };
     }
 
     std::optional<Manifest::ManifestInstaller> ManifestDeserializer::DeserializeInstaller(const web::json::value& installerJsonObject) const
@@ -61,22 +162,22 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
         {
             auto& installer = result.value();
 
-            installer.ProductId = JsonHelper::GetRawStringValueFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(MSStoreProductIdentifier)).value_or("");
-            installer.ReleaseDate = JsonHelper::GetRawStringValueFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(ReleaseDate)).value_or("");
-            installer.InstallerAbortsTerminal = JsonHelper::GetRawBoolValueFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(InstallerAbortsTerminal)).value_or(false);
-            installer.InstallLocationRequired = JsonHelper::GetRawBoolValueFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(InstallLocationRequired)).value_or(false);
-            installer.RequireExplicitUpgrade = JsonHelper::GetRawBoolValueFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(RequireExplicitUpgrade)).value_or(false);
+            installer.ProductId = JSON::GetRawStringValueFromJsonNode(installerJsonObject, JSON::GetUtilityString(MSStoreProductIdentifier)).value_or("");
+            installer.ReleaseDate = JSON::GetRawStringValueFromJsonNode(installerJsonObject, JSON::GetUtilityString(ReleaseDate)).value_or("");
+            installer.InstallerAbortsTerminal = JSON::GetRawBoolValueFromJsonNode(installerJsonObject, JSON::GetUtilityString(InstallerAbortsTerminal)).value_or(false);
+            installer.InstallLocationRequired = JSON::GetRawBoolValueFromJsonNode(installerJsonObject, JSON::GetUtilityString(InstallLocationRequired)).value_or(false);
+            installer.RequireExplicitUpgrade = JSON::GetRawBoolValueFromJsonNode(installerJsonObject, JSON::GetUtilityString(RequireExplicitUpgrade)).value_or(false);
             installer.ElevationRequirement = Manifest::ConvertToElevationRequirementEnum(
-                JsonHelper::GetRawStringValueFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(ElevationRequirement)).value_or(""));
+                JSON::GetRawStringValueFromJsonNode(installerJsonObject, JSON::GetUtilityString(ElevationRequirement)).value_or(""));
 
             // list of unsupported OS architectures
-            std::optional<std::reference_wrapper<const web::json::array>> unsupportedOSArchitectures = JsonHelper::GetRawJsonArrayFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(UnsupportedOSArchitectures));
+            std::optional<std::reference_wrapper<const web::json::array>> unsupportedOSArchitectures = JSON::GetRawJsonArrayFromJsonNode(installerJsonObject, JSON::GetUtilityString(UnsupportedOSArchitectures));
             if (unsupportedOSArchitectures)
             {
                 for (auto& archValue : unsupportedOSArchitectures.value().get())
                 {
-                    std::optional<std::string> arch = JsonHelper::GetRawStringValueFromJsonValue(archValue);
-                    if (JsonHelper::IsValidNonEmptyStringValue(arch))
+                    std::optional<std::string> arch = JSON::GetRawStringValueFromJsonValue(archValue);
+                    if (JSON::IsValidNonEmptyStringValue(arch))
                     {
                         auto archEnum = Utility::ConvertToArchitectureEnum(arch.value());
 
@@ -95,51 +196,35 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
             }
 
             // Apps and Features Entries
-            std::optional<std::reference_wrapper<const web::json::array>> arpEntriesNode = JsonHelper::GetRawJsonArrayFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(AppsAndFeaturesEntries));
+            std::optional<std::reference_wrapper<const web::json::array>> arpEntriesNode = JSON::GetRawJsonArrayFromJsonNode(installerJsonObject, JSON::GetUtilityString(AppsAndFeaturesEntries));
             if (arpEntriesNode)
             {
-                for (auto& arpEntryNode : arpEntriesNode.value().get())
-                {
-                    AppsAndFeaturesEntry arpEntry;
-                    arpEntry.DisplayName = JsonHelper::GetRawStringValueFromJsonNode(arpEntryNode, JsonHelper::GetUtilityString(DisplayName)).value_or("");
-                    arpEntry.Publisher = JsonHelper::GetRawStringValueFromJsonNode(arpEntryNode, JsonHelper::GetUtilityString(Publisher)).value_or("");
-                    arpEntry.DisplayVersion = JsonHelper::GetRawStringValueFromJsonNode(arpEntryNode, JsonHelper::GetUtilityString(DisplayVersion)).value_or("");
-                    arpEntry.ProductCode = JsonHelper::GetRawStringValueFromJsonNode(arpEntryNode, JsonHelper::GetUtilityString(ProductCode)).value_or("");
-                    arpEntry.UpgradeCode = JsonHelper::GetRawStringValueFromJsonNode(arpEntryNode, JsonHelper::GetUtilityString(UpgradeCode)).value_or("");
-                    arpEntry.InstallerType = Manifest::ConvertToInstallerTypeEnum(JsonHelper::GetRawStringValueFromJsonNode(arpEntryNode, JsonHelper::GetUtilityString(InstallerType)).value_or(""));
-
-                    // Only add when at least one field is valid
-                    if (!arpEntry.DisplayName.empty() || !arpEntry.Publisher.empty() || !arpEntry.DisplayVersion.empty() ||
-                        !arpEntry.ProductCode.empty() || !arpEntry.UpgradeCode.empty() || arpEntry.InstallerType != InstallerTypeEnum::Unknown)
-                    {
-                        installer.AppsAndFeaturesEntries.emplace_back(std::move(arpEntry));
-                    }
-                }
+                installer.AppsAndFeaturesEntries = DeserializeAppsAndFeaturesEntries(arpEntriesNode.value());
             }
 
             // Markets
-            std::optional<std::reference_wrapper<const web::json::value>> marketsNode = JsonHelper::GetJsonValueFromNode(installerJsonObject, JsonHelper::GetUtilityString(Markets));
+            std::optional<std::reference_wrapper<const web::json::value>> marketsNode = JSON::GetJsonValueFromNode(installerJsonObject, JSON::GetUtilityString(Markets));
             if (marketsNode && !marketsNode.value().get().is_null())
             {
                 installer.Markets.ExcludedMarkets = V1_0::Json::ManifestDeserializer::ConvertToManifestStringArray(
-                    JsonHelper::GetRawStringArrayFromJsonNode(marketsNode.value().get(), JsonHelper::GetUtilityString(ExcludedMarkets)));
+                    JSON::GetRawStringArrayFromJsonNode(marketsNode.value().get(), JSON::GetUtilityString(ExcludedMarkets)));
                 installer.Markets.AllowedMarkets = V1_0::Json::ManifestDeserializer::ConvertToManifestStringArray(
-                    JsonHelper::GetRawStringArrayFromJsonNode(marketsNode.value().get(), JsonHelper::GetUtilityString(AllowedMarkets)));
+                    JSON::GetRawStringArrayFromJsonNode(marketsNode.value().get(), JSON::GetUtilityString(AllowedMarkets)));
             }
 
             // Expected return codes
-            std::optional<std::reference_wrapper<const web::json::array>> expectedReturnCodesNode = JsonHelper::GetRawJsonArrayFromJsonNode(installerJsonObject, JsonHelper::GetUtilityString(ExpectedReturnCodes));
+            std::optional<std::reference_wrapper<const web::json::array>> expectedReturnCodesNode = JSON::GetRawJsonArrayFromJsonNode(installerJsonObject, JSON::GetUtilityString(ExpectedReturnCodes));
             if (expectedReturnCodesNode)
             {
                 for (auto& returnCodeNode : expectedReturnCodesNode.value().get())
                 {
-                    ExpectedReturnCodeEnum returnResponse = Manifest::ConvertToExpectedReturnCodeEnum(JsonHelper::GetRawStringValueFromJsonNode(returnCodeNode, JsonHelper::GetUtilityString(ReturnResponse)).value_or(""));
-                    DWORD installerReturnCode = static_cast<DWORD>(JsonHelper::GetRawIntValueFromJsonNode(returnCodeNode, JsonHelper::GetUtilityString(InstallerReturnCode)).value_or(0));
+                    DWORD installerReturnCode = static_cast<DWORD>(JSON::GetRawIntValueFromJsonNode(returnCodeNode, JSON::GetUtilityString(InstallerReturnCode)).value_or(0));
+                    auto returnCodeInfo = DeserializeExpectedReturnCodeInfo(returnCodeNode);
 
                     // Only add when it is valid
-                    if (installerReturnCode != 0 && returnResponse != ExpectedReturnCodeEnum::Unknown)
+                    if (installerReturnCode != 0 && returnCodeInfo.ReturnResponseEnum != ExpectedReturnCodeEnum::Unknown)
                     {
-                        if (!installer.ExpectedReturnCodes.insert({ installerReturnCode, returnResponse }).second)
+                        if (!installer.ExpectedReturnCodes.insert({ installerReturnCode, std::move(returnCodeInfo) }).second)
                         {
                             AICLI_LOG(Repo, Error, << "Expected return codes cannot have repeated value.");
                             return {};
@@ -149,13 +234,13 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
             }
 
             // Populate installer default return codes if not present in ExpectedReturnCodes and InstallerSuccessCodes
-            auto defaultReturnCodes = GetDefaultKnownReturnCodes(installer.InstallerType);
+            auto defaultReturnCodes = GetDefaultKnownReturnCodes(installer.EffectiveInstallerType());
             for (auto const& defaultReturnCode : defaultReturnCodes)
             {
                 if (installer.ExpectedReturnCodes.find(defaultReturnCode.first) == installer.ExpectedReturnCodes.end() &&
                     std::find(installer.InstallerSuccessCodes.begin(), installer.InstallerSuccessCodes.end(), defaultReturnCode.first) == installer.InstallerSuccessCodes.end())
                 {
-                    installer.ExpectedReturnCodes[defaultReturnCode.first] = defaultReturnCode.second;
+                    installer.ExpectedReturnCodes[defaultReturnCode.first].ReturnResponseEnum = defaultReturnCode.second;
                 }
             }
         }
@@ -175,7 +260,7 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
             TryParseStringLocaleField<Manifest::Localization::ReleaseNotesUrl>(locale, localeJsonObject, ReleaseNotesUrl);
 
             // Agreements
-            auto agreementsNode = JsonHelper::GetRawJsonArrayFromJsonNode(localeJsonObject, JsonHelper::GetUtilityString(Agreements));
+            auto agreementsNode = JSON::GetRawJsonArrayFromJsonNode(localeJsonObject, JSON::GetUtilityString(Agreements));
             if (agreementsNode)
             {
                 std::vector<Manifest::Agreement> agreements;
@@ -183,9 +268,9 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
                 {
                     Manifest::Agreement agreementEntry;
 
-                    agreementEntry.Label = JsonHelper::GetRawStringValueFromJsonNode(agreementNode, JsonHelper::GetUtilityString(AgreementLabel)).value_or("");
-                    agreementEntry.AgreementText = JsonHelper::GetRawStringValueFromJsonNode(agreementNode, JsonHelper::GetUtilityString(Agreement)).value_or("");
-                    agreementEntry.AgreementUrl = JsonHelper::GetRawStringValueFromJsonNode(agreementNode, JsonHelper::GetUtilityString(AgreementUrl)).value_or("");
+                    agreementEntry.Label = JSON::GetRawStringValueFromJsonNode(agreementNode, JSON::GetUtilityString(AgreementLabel)).value_or("");
+                    agreementEntry.AgreementText = JSON::GetRawStringValueFromJsonNode(agreementNode, JSON::GetUtilityString(Agreement)).value_or("");
+                    agreementEntry.AgreementUrl = JSON::GetRawStringValueFromJsonNode(agreementNode, JSON::GetUtilityString(AgreementUrl)).value_or("");
 
                     if (!agreementEntry.Label.empty() || !agreementEntry.AgreementText.empty() || !agreementEntry.AgreementUrl.empty())
                     {
@@ -201,5 +286,10 @@ namespace AppInstaller::Repository::Rest::Schema::V1_1::Json
         }
 
         return result;
+    }
+
+    Manifest::ManifestVer ManifestDeserializer::GetManifestVersion() const
+    {
+        return Manifest::s_ManifestVersionV1_1;
     }
 }

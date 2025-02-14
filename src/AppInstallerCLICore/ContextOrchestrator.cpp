@@ -4,7 +4,7 @@
 #include "ExecutionContext.h"
 #include "ContextOrchestrator.h"
 #include "COMContext.h"
-#include "Commands/COMInstallCommand.h"
+#include "Commands/COMCommand.h"
 #include "winget/UserSettings.h"
 #include <Commands/RootCommand.h>
 
@@ -12,6 +12,9 @@ namespace AppInstaller::CLI::Execution
 {
     namespace
     {
+        // Operation command queue used by install, uninstall and repair commands.
+        constexpr static std::string_view OperationCommandQueueName = "operation"sv;
+
         // Callback function used by worker threads in the queue.
         // context must be a pointer to a queue item.
         void CALLBACK OrchestratorQueueWorkCallback(PTP_CALLBACK_INSTANCE, PVOID context, PTP_WORK)
@@ -22,6 +25,17 @@ namespace AppInstaller::CLI::Execution
             {
                 queue->RunItem(queueItem->GetId());
             }
+        }
+
+        // Get command queue name based on command name.
+        std::string_view GetCommandQueueName(std::string_view commandName)
+        {
+            if (commandName == COMInstallCommand::CommandName || commandName == COMUninstallCommand::CommandName || commandName == COMRepairCommand::CommandName)
+            {
+                return OperationCommandQueueName;
+            }
+
+            return commandName;
         }
     }
 
@@ -43,11 +57,11 @@ namespace AppInstaller::CLI::Execution
         // use that as the maximum (up to 3); otherwise use a single thread.
         const auto supportedConcurrentThreads = std::thread::hardware_concurrency();
         const UINT32 maxDownloadThreads = 3;
-        const UINT32 installThreads = 1;
+        const UINT32 operationThreads = 1;
         const UINT32 downloadThreads = std::min(supportedConcurrentThreads ? supportedConcurrentThreads - 1 : 1, maxDownloadThreads);
 
         AddCommandQueue(COMDownloadCommand::CommandName, downloadThreads);
-        AddCommandQueue(COMInstallCommand::CommandName, installThreads);
+        AddCommandQueue(OperationCommandQueueName, operationThreads);
     }
 
     void ContextOrchestrator::AddCommandQueue(std::string_view commandName, UINT32 allowedThreads)
@@ -77,9 +91,13 @@ namespace AppInstaller::CLI::Execution
         if (item->IsOnFirstCommand())
         {
             THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_INSTALL_ALREADY_RUNNING), FindById(item->GetId()));
+
+            // Log the beginning of the item
+            item->GetContext().GetThreadGlobals().GetTelemetryLogger().LogCommand(item->GetItemCommandName());
         }
 
-        m_commandQueues.at(std::string(item->GetNextCommand().Name()))->EnqueueAndRunItem(item);
+        std::string commandQueueName{ GetCommandQueueName(item->GetNextCommand().Name()) };
+        m_commandQueues.at(commandQueueName)->EnqueueAndRunItem(item);
     }
 
     void ContextOrchestrator::RemoveItemInState(const OrchestratorQueueItem& item, OrchestratorQueueItemState state)
@@ -97,7 +115,7 @@ namespace AppInstaller::CLI::Execution
     void ContextOrchestrator::CancelQueueItem(const OrchestratorQueueItem& item)
     {
         // Always cancel the item, even if it isn't running yet, to get the terminationHR set correctly.
-        item.GetContext().Cancel(false, true);
+        item.GetContext().Cancel(CancelReason::Abort, true);
 
         RemoveItemInState(item, OrchestratorQueueItemState::Queued);
     }
@@ -111,14 +129,20 @@ namespace AppInstaller::CLI::Execution
 
     void ContextOrchestrator::AddItemManifestToInstallingSource(const OrchestratorQueueItem& queueItem)
     {
-        const auto& manifest = queueItem.GetContext().Get<Execution::Data::Manifest>();
-        m_installingWriteableSource.AddPackageVersion(manifest, std::filesystem::path{ manifest.Id + '.' + manifest.Version });
+        if (queueItem.IsApplicableForInstallingSource())
+        {
+            const auto& manifest = queueItem.GetContext().Get<Execution::Data::Manifest>();
+            m_installingWriteableSource.AddPackageVersion(manifest, std::filesystem::path{ manifest.Id + '.' + manifest.Version });
+        }
     }
 
     void ContextOrchestrator::RemoveItemManifestFromInstallingSource(const OrchestratorQueueItem& queueItem)
     {
-        const auto& manifest = queueItem.GetContext().Get<Execution::Data::Manifest>();
-        m_installingWriteableSource.RemovePackageVersion(manifest, std::filesystem::path{ manifest.Id + '.' + manifest.Version });
+        if (queueItem.IsApplicableForInstallingSource())
+        {
+            const auto& manifest = queueItem.GetContext().Get<Execution::Data::Manifest>();
+            m_installingWriteableSource.RemovePackageVersion(manifest, std::filesystem::path{ manifest.Id + '.' + manifest.Version });
+        }
     }
 
     _Requires_lock_held_(m_queueLock)
@@ -150,7 +174,20 @@ namespace AppInstaller::CLI::Execution
         // Only do this the first time the item is queued.
         if (item->IsOnFirstCommand())
         {
-            ContextOrchestrator::Instance().AddItemManifestToInstallingSource(*item);
+            try
+            {
+                ContextOrchestrator::Instance().AddItemManifestToInstallingSource(*item);
+            }
+            catch (...)
+            {
+                std::lock_guard<std::mutex> lockQueue{ m_queueLock };
+                auto itr = FindIteratorById(item->GetId());
+                if (itr != m_queueItems.end())
+                {
+                    m_queueItems.erase(itr);
+                }
+                throw;
+            }
         }
 
         {
@@ -225,34 +262,37 @@ namespace AppInstaller::CLI::Execution
             }
 
             // Get the item's command and execute it.
-            HRESULT terminationHR = S_OK;
+            HRESULT exceptionHR = S_OK;
             try
             {
                 std::unique_ptr<Command> command = item->PopNextCommand();
 
                 std::unique_ptr<AppInstaller::ThreadLocalStorage::PreviousThreadGlobals> setThreadGlobalsToPreviousState = item->GetContext().SetForCurrentThread();
 
-                item->GetContext().GetThreadGlobals().GetTelemetryLogger().LogCommand(command->FullName());
                 command->ValidateArguments(item->GetContext().Args);
 
-                item->GetContext().EnableCtrlHandler();
+                item->GetContext().EnableSignalTerminationHandler();
 
-                terminationHR = ::AppInstaller::CLI::Execute(item->GetContext(), command);
+                ::AppInstaller::CLI::ExecuteWithoutLoggingSuccess(item->GetContext(), command.get());
             }
-            WINGET_CATCH_STORE(terminationHR, APPINSTALLER_CLI_ERROR_COMMAND_FAILED);
+            WINGET_CATCH_STORE(exceptionHR, APPINSTALLER_CLI_ERROR_COMMAND_FAILED);
 
-            if (FAILED(terminationHR))
+            if (FAILED(exceptionHR))
             {
-                // ::Execute sometimes catches exceptions and returns hresults based on those exceptions without the context
-                // being updated with that hresult. This sets the termination hr directly so that the context always 
+                // Set the termination hr directly from any exception that escaped so that the context always 
                 // has the result of the operation no matter how it failed.
-                item->GetContext().SetTerminationHR(terminationHR);
+                item->GetContext().SetTerminationHR(exceptionHR);
             }
 
-            item->GetContext().EnableCtrlHandler(false);
+            item->GetContext().EnableSignalTerminationHandler(false);
 
-            if (FAILED(terminationHR) || item->IsComplete())
+            if (FAILED(item->GetContext().GetTerminationHR()) || item->IsComplete())
             {
+                if (SUCCEEDED(item->GetContext().GetTerminationHR()))
+                {
+                    item->GetContext().GetThreadGlobals().GetTelemetryLogger().LogCommandSuccess(item->GetItemCommandName());
+                }
+
                 RemoveItemInState(*item, OrchestratorQueueItemState::Running, true);
             }
             else
@@ -313,11 +353,53 @@ namespace AppInstaller::CLI::Execution
                 (GetSourceId() == comparedId.GetSourceId()));
     }
 
-    std::unique_ptr<OrchestratorQueueItem> OrchestratorQueueItemFactory::CreateItemForInstall(std::wstring packageId, std::wstring sourceId, std::unique_ptr<COMContext> context)
+    std::string_view OrchestratorQueueItem::GetItemCommandName() const
     {
-        std::unique_ptr<OrchestratorQueueItem> item = std::make_unique<OrchestratorQueueItem>(OrchestratorQueueItemId(std::move(packageId), std::move(sourceId)), std::move(context));
+        // The goal is that these should match the winget.exe commands for easy correlation.
+        switch (m_operationType)
+        {
+        case PackageOperationType::Search: return "root:search"sv;
+        case PackageOperationType::Install: return "root:install"sv;
+        case PackageOperationType::Upgrade: return "root:upgrade"sv;
+        case PackageOperationType::Uninstall: return "root:uninstall"sv;
+        case PackageOperationType::Download: return "root:download"sv;
+        case PackageOperationType::Repair: return "root:repair"sv;
+        default: return "unknown";
+        }
+    }
+
+    std::unique_ptr<OrchestratorQueueItem> OrchestratorQueueItemFactory::CreateItemForInstall(std::wstring packageId, std::wstring sourceId, std::unique_ptr<COMContext> context, bool isUpgrade)
+    {
+        std::unique_ptr<OrchestratorQueueItem> item = std::make_unique<OrchestratorQueueItem>(OrchestratorQueueItemId(std::move(packageId), std::move(sourceId)), std::move(context), isUpgrade ? PackageOperationType::Upgrade : PackageOperationType::Install);
         item->AddCommand(std::make_unique<::AppInstaller::CLI::COMDownloadCommand>(RootCommand::CommandName));
         item->AddCommand(std::make_unique<::AppInstaller::CLI::COMInstallCommand>(RootCommand::CommandName));
+        return item;
+    }
+
+    std::unique_ptr<OrchestratorQueueItem> OrchestratorQueueItemFactory::CreateItemForUninstall(std::wstring packageId, std::wstring sourceId, std::unique_ptr<COMContext> context)
+    {
+        std::unique_ptr<OrchestratorQueueItem> item = std::make_unique<OrchestratorQueueItem>(OrchestratorQueueItemId(std::move(packageId), std::move(sourceId)), std::move(context), PackageOperationType::Uninstall);
+        item->AddCommand(std::make_unique<::AppInstaller::CLI::COMUninstallCommand>(RootCommand::CommandName));
+        return item;
+    }
+
+    std::unique_ptr<OrchestratorQueueItem> OrchestratorQueueItemFactory::CreateItemForSearch(std::wstring packageId, std::wstring sourceId, std::unique_ptr<COMContext> context)
+    {
+        std::unique_ptr<OrchestratorQueueItem> item = std::make_unique<OrchestratorQueueItem>(OrchestratorQueueItemId(std::move(packageId), std::move(sourceId)), std::move(context), PackageOperationType::Search);
+        return item;
+    }
+
+    std::unique_ptr<OrchestratorQueueItem> OrchestratorQueueItemFactory::CreateItemForDownload(std::wstring packageId, std::wstring sourceId, std::unique_ptr<COMContext> context)
+    {
+        std::unique_ptr<OrchestratorQueueItem> item = std::make_unique<OrchestratorQueueItem>(OrchestratorQueueItemId(std::move(packageId), std::move(sourceId)), std::move(context), PackageOperationType::Download);
+        item->AddCommand(std::make_unique<::AppInstaller::CLI::COMDownloadCommand>(RootCommand::CommandName));
+        return item;
+    }
+
+    std::unique_ptr<OrchestratorQueueItem> OrchestratorQueueItemFactory::CreateItemForRepair(std::wstring packageId, std::wstring sourceId, std::unique_ptr<COMContext> context)
+    {
+        std::unique_ptr<OrchestratorQueueItem> item = std::make_unique<OrchestratorQueueItem>(OrchestratorQueueItemId(std::move(packageId), std::move(sourceId)), std::move(context), PackageOperationType::Repair);
+        item->AddCommand(std::make_unique<::AppInstaller::CLI::COMRepairCommand>(RootCommand::CommandName));
         return item;
     }
 }

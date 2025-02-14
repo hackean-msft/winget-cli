@@ -26,8 +26,60 @@
           "enum": [
             "accent",
             "rainbow",
-            "retro"
+            "retro",
+            "sixel",
+            "disabled"
           ]
+        },
+        "anonymizeDisplayedPaths": {
+          "description": "Replaces some known folder paths with their respective environment variable",
+          "type": "boolean",
+          "default": true
+        },
+        "enableSixels": {
+          "description": "Enables output of sixel images in certain contexts",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "Logging": {
+      "description": "Logging settings",
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "Preferred logging level",
+          "type": "string",
+          "enum": [
+            "verbose",
+            "info",
+            "warning",
+            "error",
+            "critical"
+          ]
+        },
+        "channels": {
+          "description": "The logging channels to enable",
+          "type": "array",
+          "items": {
+            "uniqueItems": true,
+            "type": "string",
+            "enum": [
+              "fail",
+              "cli",
+              "sql",
+              "repo",
+              "yaml",
+              "core",
+              "test",
+              "config",
+              "default",
+              "all"
+            ],
+            "maxLength": 20
+          },
+          "minItems": 0,
+          "maxItems": 20
         }
       }
     },
@@ -59,7 +111,7 @@
           "description": "The architecture(s) to use for a package install",
           "type": "array",
           "items": {
-            "uniqueItems": "true",
+            "uniqueItems": true,
             "type": "string",
             "enum": [
               "neutral",
@@ -71,6 +123,28 @@
             "minItems": 1,
             "maxItems": 4
           }
+        },
+        "installerTypes": {
+          "description": "The installerType(s) to use for a package install",
+          "type": "array",
+          "items": {
+            "uniqueItems": true,
+            "type": "string",
+            "enum": [
+              "inno",
+              "wix",
+              "msi",
+              "nullsoft",
+              "zip",
+              "msix",
+              "exe",
+              "burn",
+              "msstore",
+              "portable"
+            ],
+            "minItems": 1,
+            "maxItems": 9
+          }
         }
       }
     },
@@ -79,7 +153,81 @@
       "type": "object",
       "properties": {
         "preferences": { "$ref": "#/definitions/InstallPrefReq" },
-        "requirements": { "$ref": "#/definitions/InstallPrefReq" }
+        "requirements": { "$ref": "#/definitions/InstallPrefReq" },
+        "skipDependencies": {
+          "description": "Controls whether package dependencies and Windows Features are skipped during installation",
+          "type": "boolean",
+          "default": false
+        },
+        "disableInstallNotes": {
+          "description": "Controls whether installation notes are shown after a successful install",
+          "type": "boolean",
+          "default": false
+        },
+        "portablePackageUserRoot": {
+          "description": "The default root directory where packages are installed to under User scope. Applies to the portable installer type.",
+          "type": "string",
+          "default": "%LOCALAPPDATA%/Microsoft/WinGet/Packages/"
+        },
+        "portablePackageMachineRoot": {
+          "description": "The default root directory where packages are installed to under Machine scope. Applies to the portable installer type.",
+          "type": "string",
+          "default": "%PROGRAMFILES%/WinGet/Packages/"
+        },
+        "defaultInstallRoot": {
+          "description": "Default install location to use for packages that require it when not specified",
+          "type": "string",
+          "maxLength": 32767
+        },
+        "maxResumes": {
+          "description": "The maximum number of resumes allowed for a single resume id. This is to prevent continuous reboots if an install that requires a reboot is not properly detected.",
+          "type": "integer",
+          "default": 3,
+          "minimum": 1
+        },
+        "archiveExtractionMethod": {
+          "description": "Controls the behavior how the installer extracts archives. The current two supported values are 'shellApi' and 'tar'. 'shellApi' uses the Windows Shell API to extract archives. 'tar' uses the tar command to extract archives.",
+          "type": "string",
+          "enum": [
+            "shellApi",
+            "tar"
+          ],
+          "default": "shellApi"
+        }
+      }
+    },
+    "UninstallBehavior": {
+      "description": "Uninstall settings",
+      "type": "object",
+      "properties": {
+        "purgePortablePackage": {
+          "description": "Controls whether the default behavior for uninstall removes all files and directories relevant to this package. Only applies to the portable installerType.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "ConfigureBehavior": {
+      "description": "Configure settings",
+      "type": "object",
+      "properties": {
+        "defaultModuleRoot": {
+          "description": "The default root directory where PowerShell modules are installed to when applying a configuration.",
+          "type": "string",
+          "maxLength": 32767,
+          "default": "%LOCALAPPDATA%/Microsoft/WinGet/Configuration/Modules/"
+        }
+      }
+    },
+    "DownloadBehavior": {
+      "description": "Download settings",
+      "type": "object",
+      "properties": {
+        "defaultDownloadDirectory": {
+          "description": "The default directory where installers are downloaded to.",
+          "type": "string",
+          "default": "%USERPROFILE%/Downloads/"
+        }
       }
     },
     "Telemetry": {
@@ -116,6 +264,17 @@
         }
       }
     },
+    "Interactivity": {
+      "description": "Interactivity settings",
+      "type": "object",
+      "properties": {
+        "disable": {
+          "description": "Controls whether interactive prompts are shown by the Windows Package Manager client",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
     "Experimental": {
       "description": "Experimental Features",
       "type": "object",
@@ -130,13 +289,28 @@
           "type": "boolean",
           "default": false
         },
-        "dependencies": {
-          "description": "Support for package dependencies",
+        "directMSI": {
+          "description": "Enable use of MSI APIs rather than msiexec for MSI installs",
           "type": "boolean",
           "default": false
         },
-        "directMSI": {
-          "description": "Enable use of MSI APIs rather than msiexec for MSI installs",
+        "configuration03": {
+          "description": "Enable support for configuration schema 0.3",
+          "type": "boolean",
+          "default": false
+        },
+        "configureSelfElevate": {
+          "description": "Enable configure commands request elevation as needed",
+          "type": "boolean",
+          "default": false
+        },
+        "configureExport": {
+          "description": "Enable support for the configure export command",
+          "type": "boolean",
+          "default": false
+        },
+        "fonts": {
+          "description": "Enable support for managing fonts",
           "type": "boolean",
           "default": false
         }
@@ -146,19 +320,49 @@
   "allOf": [
     {
       "properties": {
-        "visual": { "$ref": "#/definitions/Visual" }
-      },
-      "additionalItems": true
-    },
-    {
-      "properties": {
         "source": { "$ref": "#/definitions/Source" }
       },
       "additionalItems": true
     },
     {
       "properties": {
+        "visual": { "$ref": "#/definitions/Visual" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
+        "logging": { "$ref": "#/definitions/Logging" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
+        "installPrefReq": { "$ref": "#/definitions/InstallPrefReq" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
         "installBehavior": { "$ref": "#/definitions/InstallBehavior" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
+        "uninstallBehavior": { "$ref": "#/definitions/UninstallBehavior" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
+        "configureBehavior": { "$ref": "#/definitions/ConfigureBehavior" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
+        "downloadBehavior": { "$ref": "#/definitions/DownloadBehavior" }
       },
       "additionalItems": true
     },
@@ -171,6 +375,12 @@
     {
       "properties": {
         "network": { "$ref": "#/definitions/Network" }
+      },
+      "additionalItems": true
+    },
+    {
+      "properties": {
+        "interactivity": { "$ref": "#/definitions/Interactivity" }
       },
       "additionalItems": true
     },
